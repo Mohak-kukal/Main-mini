@@ -1,0 +1,209 @@
+import axios, { AxiosInstance, AxiosResponse } from 'axios'
+import { 
+  AuthResponse, 
+  User, 
+  Account, 
+  Transaction, 
+  TransactionsResponse, 
+  Budget, 
+  BudgetAnalysis,
+  Prediction,
+  InsightsData,
+  AIAdvice,
+  OCRResult,
+  CategorizationResult
+} from '../types'
+
+// Token getter function - will be set by Clerk auth hook
+let tokenGetter: (() => Promise<string | null>) | null = null
+
+export function setTokenGetter(getter: () => Promise<string | null>) {
+  tokenGetter = getter
+}
+
+class ApiClient {
+  private client: AxiosInstance
+
+  constructor() {
+    this.client = axios.create({
+      baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
+      timeout: 10000,
+    })
+
+    // Add request interceptor to include auth token from Clerk
+    this.client.interceptors.request.use(async (config) => {
+      try {
+        if (tokenGetter) {
+          const token = await tokenGetter()
+          if (token) {
+            config.headers.Authorization = `Bearer ${token}`
+          }
+        }
+      } catch (error) {
+        // If Clerk is not initialized or user not signed in, continue without token
+      }
+      return config
+    })
+
+      // Add response interceptor to handle errors
+      this.client.interceptors.response.use(
+        (response) => response,
+        (error) => {
+          // Handle rate limiting (429) errors
+          if (error?.response?.status === 429) {
+            const retryAfter = error?.response?.headers['retry-after'] || 15
+            console.warn(`Rate limit exceeded. Retry after ${retryAfter} seconds.`)
+          }
+          // Do NOT auto-clear auth on any transient backend error.
+          // Surface error to the UI and let pages handle it gracefully.
+          return Promise.reject(error)
+        }
+      )
+  }
+
+  // Auth endpoints
+  async register(name: string, email: string, password: string): Promise<AuthResponse> {
+    const response = await this.client.post('/auth/register', { name, email, password })
+    return response.data
+  }
+
+  async login(email: string, password: string): Promise<AuthResponse> {
+    const response = await this.client.post('/auth/login', { email, password })
+    return response.data
+  }
+
+  async getCurrentUser(): Promise<{ user: User }> {
+    const response = await this.client.get('/auth/me')
+    return response.data
+  }
+
+  // Account endpoints
+  async getAccounts(): Promise<{ accounts: Account[] }> {
+    const response = await this.client.get('/accounts')
+    return response.data
+  }
+
+  async createAccount(name: string, type: string, balance: number): Promise<{ account: Account }> {
+    const response = await this.client.post('/accounts', { name, type, balance })
+    return response.data
+  }
+
+  async updateAccount(id: number, updates: Partial<Account>): Promise<{ account: Account }> {
+    const response = await this.client.put(`/accounts/${id}`, updates)
+    return response.data
+  }
+
+  async deleteAccount(id: number): Promise<void> {
+    await this.client.delete(`/accounts/${id}`)
+  }
+
+  // Transaction endpoints
+  async getTransactions(params?: {
+    page?: number
+    limit?: number
+    account_id?: number
+    category?: string
+    start_date?: string
+    end_date?: string
+  }): Promise<TransactionsResponse> {
+    const response = await this.client.get('/transactions', { params })
+    return response.data
+  }
+
+  async createTransaction(transaction: {
+    account_id: number
+    date: string
+    amount: number
+    merchant?: string
+    description?: string
+    category?: string
+  }): Promise<{ transaction: Transaction }> {
+    const response = await this.client.post('/transactions', transaction)
+    return response.data
+  }
+
+  async updateTransaction(id: number, updates: Partial<Transaction>): Promise<{ transaction: Transaction }> {
+    const response = await this.client.put(`/transactions/${id}`, updates)
+    return response.data
+  }
+
+  async deleteTransaction(id: number): Promise<void> {
+    await this.client.delete(`/transactions/${id}`)
+  }
+
+  async uploadReceipt(file: File): Promise<OCRResult> {
+    const formData = new FormData()
+    formData.append('receipt', file)
+    const response = await this.client.post('/transactions/uploadReceipt', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 60000 // 60 seconds for OCR processing
+    })
+    return response.data
+  }
+
+  // Budget endpoints
+  async getBudgets(params?: { month?: number; year?: number }): Promise<{ budgets: Budget[] }> {
+    const response = await this.client.get('/budgets', { params })
+    return response.data
+  }
+
+  async createBudget(budget: {
+    category: string
+    limit_amount: number
+    month: number
+    year: number
+  }): Promise<{ budget: Budget }> {
+    const response = await this.client.post('/budgets', budget)
+    return response.data
+  }
+
+  async updateBudget(id: number, updates: Partial<Budget>): Promise<{ budget: Budget }> {
+    const response = await this.client.put(`/budgets/${id}`, updates)
+    return response.data
+  }
+
+  async deleteBudget(id: number): Promise<void> {
+    await this.client.delete(`/budgets/${id}`)
+  }
+
+  async getBudgetAnalysis(params?: { month?: number; year?: number }): Promise<{ analysis: BudgetAnalysis[] }> {
+    const response = await this.client.get('/budgets/analysis', { params })
+    return response.data
+  }
+
+  // AI endpoints
+  async categorizeTransaction(merchant?: string, description?: string, amount?: number): Promise<CategorizationResult> {
+    const response = await this.client.post('/ai/categorize', { merchant, description, amount })
+    return response.data
+  }
+
+  async trainModel(transaction_id: number, old_category: string, new_category: string): Promise<void> {
+    await this.client.post('/ai/train', { transaction_id, old_category, new_category })
+  }
+
+  async getPredictions(params?: { month?: number; year?: number }): Promise<{ predictions: Prediction[] }> {
+    const response = await this.client.get('/ai/predict', { 
+      params,
+      timeout: 60000 // 60 seconds for AI processing
+    })
+    return response.data
+  }
+
+  async getAdvice(params?: { month?: number; year?: number }): Promise<AIAdvice> {
+    const response = await this.client.post('/ai/advice', params, {
+      timeout: 60000 // 60 seconds for AI processing
+    })
+    // Handle response structure: { success: true, advice: {...} } or direct advice object
+    if (response.data && response.data.advice) {
+      return response.data.advice
+    }
+    return response.data
+  }
+
+  async getInsights(params?: { months?: number }): Promise<InsightsData> {
+    const response = await this.client.get('/ai/insights', { params })
+    return response.data
+  }
+}
+
+export const apiClient = new ApiClient()
