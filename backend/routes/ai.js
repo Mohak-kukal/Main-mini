@@ -241,6 +241,139 @@ router.post('/advice', authenticateToken, async (req, res) => {
   }
 });
 
+// Stream AI financial advice
+router.post('/advice/stream', authenticateToken, async (req, res) => {
+  try {
+    const { month, year } = req.body;
+    const currentMonth = month || new Date().getMonth() + 1;
+    const currentYear = year || new Date().getFullYear();
+
+    // Check total transaction count first
+    const totalTransactions = await db('transactions')
+      .where('user_id', req.user.userId)
+      .where('amount', '<', 0)
+      .count('* as count')
+      .first();
+
+    const MIN_TRANSACTIONS = 10;
+    if (parseInt(totalTransactions.count) < MIN_TRANSACTIONS) {
+      return res.json({
+        summary: `We need at least ${MIN_TRANSACTIONS} transactions to provide personalized financial advice. You currently have ${totalTransactions.count} transaction${totalTransactions.count !== 1 ? 's' : ''}.`,
+        concerns: [],
+        recommendations: [],
+        positive_feedback: [],
+        confidence_score: 0,
+        insufficient_data: true,
+        current_count: parseInt(totalTransactions.count),
+        required_count: MIN_TRANSACTIONS
+      });
+    }
+
+    // Get spending data for the last 3 months
+    const threeMonthsAgo = new Date(currentYear, currentMonth - 1 - 3, 1);
+    const startDate = `${threeMonthsAgo.getFullYear()}-${String(threeMonthsAgo.getMonth() + 1).padStart(2, '0')}-01`;
+    const lastDayOfCurrentMonth = new Date(currentYear, currentMonth, 0).getDate();
+    const endDate = `${currentYear}-${String(currentMonth).padStart(2, '0')}-${String(lastDayOfCurrentMonth).padStart(2, '0')}`;
+
+    // Get spending by category for last 3 months (monthly breakdown)
+    const allTransactions = await db('transactions')
+      .select('category', 'amount', 'date')
+      .where('user_id', req.user.userId)
+      .whereBetween('date', [startDate, endDate])
+      .where('amount', '<', 0)
+      .orderBy('date', 'desc');
+
+    // Group by month and category
+    const monthlySpending = {};
+    allTransactions.forEach(transaction => {
+      const date = new Date(transaction.date);
+      const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      if (!monthlySpending[monthKey]) {
+        monthlySpending[monthKey] = {};
+      }
+      const category = transaction.category || 'other';
+      monthlySpending[monthKey][category] = (monthlySpending[monthKey][category] || 0) + Math.abs(transaction.amount);
+    });
+
+    // Get current month spending (for budget comparison)
+    const currentMonthStart = `${currentYear}-${String(currentMonth).padStart(2, '0')}-01`;
+    const currentMonthEnd = new Date(currentYear, currentMonth, 0).toISOString().split('T')[0];
+    const currentSpending = await db('transactions')
+      .select('category')
+      .sum('amount as total')
+      .where('user_id', req.user.userId)
+      .whereBetween('date', [currentMonthStart, currentMonthEnd])
+      .where('amount', '<', 0)
+      .groupBy('category');
+
+    // Get budgets for current month
+    const budgets = await db('budgets')
+      .where({
+        user_id: req.user.userId,
+        month: parseInt(currentMonth),
+        year: parseInt(currentYear)
+      });
+
+    // Get predictions for next month
+    const nextMonth = currentMonth === 12 ? 1 : currentMonth + 1;
+    const nextYear = currentMonth === 12 ? currentYear + 1 : currentYear;
+
+    const predictions = await db('predictions')
+      .where({
+        user_id: req.user.userId,
+        month: nextMonth,
+        year: nextYear
+      });
+
+    const adviceData = {
+      current_spending: currentSpending,
+      monthly_spending: monthlySpending,
+      budgets,
+      predictions,
+      user_id: req.user.userId,
+      analysis_period_months: 3
+    };
+
+    // Set headers for Server-Sent Events
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    // Proxy the stream from ML service
+    try {
+      const streamResponse = await axios.post(
+        `${process.env.ML_SERVICE_URL}/advice/stream`,
+        adviceData,
+        {
+          responseType: 'stream',
+          timeout: 120000 // 2 minutes timeout
+        }
+      );
+
+      streamResponse.data.on('data', (chunk) => {
+        res.write(chunk.toString());
+      });
+
+      streamResponse.data.on('end', () => {
+        res.end();
+      });
+
+      streamResponse.data.on('error', (error) => {
+        console.error('Stream error:', error);
+        res.write(`data: ${JSON.stringify({ type: 'error', error: error.message })}\n\n`);
+        res.end();
+      });
+    } catch (error) {
+      console.error('Stream request error:', error);
+      res.write(`data: ${JSON.stringify({ type: 'error', error: 'Failed to start streaming' })}\n\n`);
+      res.end();
+    }
+  } catch (error) {
+    console.error('Advice streaming error:', error);
+    res.status(500).json({ error: 'Failed to generate financial advice' });
+  }
+});
+
 // Get insights and analytics
 router.get('/insights', authenticateToken, async (req, res) => {
   try {

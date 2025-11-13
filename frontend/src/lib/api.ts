@@ -200,6 +200,85 @@ class ApiClient {
     return response.data
   }
 
+  async getAdviceStream(
+    params: { month?: number; year?: number } | undefined,
+    onChunk: (text: string) => void,
+    onComplete: (advice: AIAdvice) => void,
+    onError: (error: string) => void
+  ): Promise<void> {
+    // Get token from tokenGetter
+    let token: string | null = null
+    if (tokenGetter) {
+      try {
+        token = await tokenGetter()
+      } catch (e) {
+        console.warn('Failed to get token:', e)
+      }
+    }
+    
+    const baseURL = this.client.defaults.baseURL || import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
+    const url = `${baseURL}/ai/advice/stream`
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: JSON.stringify(params || {}),
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      onError(`HTTP error! status: ${response.status} - ${errorText}`)
+      return
+    }
+
+    const reader = response.body?.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    if (!reader) {
+      onError('No response body reader available')
+      return
+    }
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+              
+              if (data.type === 'chunk') {
+                onChunk(data.text)
+              } else if (data.type === 'complete') {
+                const adviceData = data.advice || data
+                onComplete(adviceData)
+                return
+              } else if (data.type === 'error') {
+                onError(data.error || 'Unknown error')
+                return
+              }
+            } catch (e) {
+              console.warn('Failed to parse SSE data:', e, line)
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      onError(error.message || 'Stream reading error')
+    }
+  }
+
   async getInsights(params?: { months?: number }): Promise<InsightsData> {
     const response = await this.client.get('/ai/insights', { params })
     return response.data

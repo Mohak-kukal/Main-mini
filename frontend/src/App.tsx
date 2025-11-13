@@ -71,9 +71,66 @@ const router = createBrowserRouter([
       },
     ],
   },
-])
+], {
+  future: {
+    v7_startTransition: true,
+    v7_relativeSplatPath: true,
+  },
+})
 
 function App() {
+  // Preserve scroll position when switching browser tabs (not when navigating between pages)
+  React.useEffect(() => {
+    let savedScrollPos: number | null = null
+    
+    // Store scroll position when tab becomes hidden
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // Save current scroll position when switching away from the tab
+        savedScrollPos = window.scrollY || document.documentElement.scrollTop
+        sessionStorage.setItem('tabScrollPosition', savedScrollPos.toString())
+      } else {
+        // Restore scroll position when tab becomes visible again
+        const storedScroll = sessionStorage.getItem('tabScrollPosition')
+        if (storedScroll) {
+          const scrollValue = parseInt(storedScroll, 10)
+          // Use multiple attempts to ensure scroll is restored after content loads
+          const restoreScroll = () => {
+            window.scrollTo(0, scrollValue)
+          }
+          
+          // Try immediately
+          restoreScroll()
+          
+          // Try after a short delay (in case content is still loading)
+          setTimeout(restoreScroll, 50)
+          setTimeout(restoreScroll, 200)
+        }
+      }
+    }
+
+    // Also save on page unload
+    const handleBeforeUnload = () => {
+      const scrollPos = window.scrollY || document.documentElement.scrollTop
+      sessionStorage.setItem('tabScrollPosition', scrollPos.toString())
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('beforeunload', handleBeforeUnload)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [])
+
+  // Disable automatic scroll restoration (browser default behavior)
+  React.useEffect(() => {
+    if ('scrollRestoration' in history) {
+      history.scrollRestoration = 'manual'
+    }
+  }, [])
+
   // If Clerk key is missing, show a helpful message
   if (!clerkPubKey) {
     return (

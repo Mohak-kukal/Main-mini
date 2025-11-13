@@ -1,8 +1,10 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 import os
+import json
 from dotenv import load_dotenv
 from pathlib import Path
 
@@ -139,6 +141,25 @@ async def generate_advice(request: AdviceRequest):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/advice/stream")
+async def generate_advice_stream(request: AdviceRequest):
+    """Stream advice generation as it's being created"""
+    async def generate():
+        try:
+            for chunk in advice_service.generate_advice_stream(
+                current_spending=request.current_spending,
+                monthly_spending=request.monthly_spending,
+                budgets=request.budgets,
+                predictions=request.predictions,
+                user_id=request.user_id,
+                analysis_period_months=request.analysis_period_months
+            ):
+                yield f"data: {json.dumps(chunk)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
+    
+    return StreamingResponse(generate(), media_type="text/event-stream")
 
 if __name__ == "__main__":
     # Create necessary directories

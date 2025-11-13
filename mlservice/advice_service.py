@@ -88,6 +88,50 @@ class AdviceService:
                 "advice": self._get_fallback_advice()
             }
     
+    def generate_advice_stream(self, current_spending: List[Dict], budgets: List[Dict], 
+                              predictions: List[Dict], user_id: int, 
+                              monthly_spending: Dict[str, Dict[str, float]] = None,
+                              analysis_period_months: int = 3):
+        """Stream advice generation as it's being created"""
+        try:
+            # Prepare data for analysis
+            analysis_data = self._prepare_analysis_data(
+                current_spending, budgets, predictions, 
+                monthly_spending, analysis_period_months
+            )
+            
+            # Create prompt for Gemini
+            prompt = self._create_advice_prompt(analysis_data)
+            
+            # Stream response from Gemini
+            response_text = ""
+            for name in self.model_names:
+                try:
+                    model = genai.GenerativeModel(name)
+                    # Stream the response
+                    response = model.generate_content(prompt, stream=True)
+                    
+                    for chunk in response:
+                        if hasattr(chunk, 'text') and chunk.text:
+                            response_text += chunk.text
+                            yield {'type': 'chunk', 'text': chunk.text, 'partial': True}
+                    
+                    if response_text:
+                        break
+                except Exception as e:
+                    continue
+            
+            # Parse final response
+            if response_text:
+                advice_data = self._parse_advice_response(response_text)
+                yield {'type': 'complete', 'advice': advice_data, 'success': True}
+            else:
+                fallback = self._get_fallback_advice()
+                yield {'type': 'complete', 'advice': fallback, 'success': False}
+                
+        except Exception as e:
+            yield {'type': 'error', 'error': str(e)}
+    
     def _prepare_analysis_data(self, current_spending: List[Dict], 
                             budgets: List[Dict], predictions: List[Dict],
                             monthly_spending: Dict[str, Dict[str, float]] = None,

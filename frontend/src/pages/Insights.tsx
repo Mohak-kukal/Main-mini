@@ -36,6 +36,26 @@ export function Insights() {
   
   useEffect(() => {
     setMounted(true)
+    
+    // Restore advice and predictions from sessionStorage
+    const savedAdvice = sessionStorage.getItem('insights_advice')
+    const savedPredictions = sessionStorage.getItem('insights_predictions')
+    
+    if (savedAdvice) {
+      try {
+        setAiAdvice(JSON.parse(savedAdvice))
+      } catch (e) {
+        console.warn('Failed to restore advice:', e)
+      }
+    }
+    
+    if (savedPredictions) {
+      try {
+        setPredictions(JSON.parse(savedPredictions))
+      } catch (e) {
+        console.warn('Failed to restore predictions:', e)
+      }
+    }
   }, [])
   
   const isDark = mounted && (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches))
@@ -79,27 +99,179 @@ export function Insights() {
     }
   }
 
+  const [streamingAdvice, setStreamingAdvice] = useState<Partial<AIAdvice> | null>(null)
+  const [streamingText, setStreamingText] = useState('')
+
+  // Helper function to parse partial JSON incrementally
+  const parsePartialJSON = (text: string): Partial<AIAdvice> => {
+    const advice: Partial<AIAdvice> = {
+      summary: '',
+      concerns: [],
+      recommendations: [],
+      positive_feedback: [],
+      next_steps: [],
+      confidence_score: 0
+    }
+
+    try {
+      // Try to extract summary
+      const summaryMatch = text.match(/"summary"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/)
+      if (summaryMatch) {
+        advice.summary = summaryMatch[1].replace(/\\"/g, '"').replace(/\\n/g, '\n')
+      }
+
+      // Try to extract concerns array
+      const concernsMatch = text.match(/"concerns"\s*:\s*\[(.*?)\]/s)
+      if (concernsMatch) {
+        try {
+          const concernsStr = concernsMatch[1]
+          const concernMatches = concernsStr.matchAll(/"([^"]*(?:\\.[^"]*)*)"/g)
+          advice.concerns = Array.from(concernMatches, m => m[1].replace(/\\"/g, '"'))
+        } catch (e) {
+          // Partial parsing
+        }
+      }
+
+      // Try to extract recommendations
+      const recsMatch = text.match(/"recommendations"\s*:\s*\[(.*?)\]/s)
+      if (recsMatch) {
+        try {
+          const recsStr = recsMatch[1]
+          const recMatches = recsStr.matchAll(/\{[^}]*"title"\s*:\s*"([^"]*)"[^}]*"description"\s*:\s*"([^"]*)"[^}]*\}/g)
+          advice.recommendations = Array.from(recMatches, m => ({
+            title: m[1],
+            description: m[2] || '',
+            priority: 'medium' as const,
+            potential_savings: ''
+          }))
+        } catch (e) {
+          // Partial parsing
+        }
+      }
+
+      // Try to extract positive_feedback
+      const feedbackMatch = text.match(/"positive_feedback"\s*:\s*\[(.*?)\]/s)
+      if (feedbackMatch) {
+        try {
+          const feedbackStr = feedbackMatch[1]
+          const feedbackMatches = feedbackStr.matchAll(/"([^"]*(?:\\.[^"]*)*)"/g)
+          advice.positive_feedback = Array.from(feedbackMatches, m => m[1].replace(/\\"/g, '"'))
+        } catch (e) {
+          // Partial parsing
+        }
+      }
+
+      // Try to extract next_steps
+      const stepsMatch = text.match(/"next_steps"\s*:\s*\[(.*?)\]/s)
+      if (stepsMatch) {
+        try {
+          const stepsStr = stepsMatch[1]
+          const stepMatches = stepsStr.matchAll(/"([^"]*(?:\\.[^"]*)*)"/g)
+          advice.next_steps = Array.from(stepMatches, m => m[1].replace(/\\"/g, '"'))
+        } catch (e) {
+          // Partial parsing
+        }
+      }
+
+      // Try to extract confidence_score
+      const confidenceMatch = text.match(/"confidence_score"\s*:\s*(\d+)/)
+      if (confidenceMatch) {
+        advice.confidence_score = parseInt(confidenceMatch[1], 10)
+      }
+    } catch (e) {
+      // Continue with partial data
+    }
+
+    return advice
+  }
+
   const generateAdvice = async () => {
     setAdviceLoading(true)
+    setStreamingText('')
+    setStreamingAdvice(null)
+    setAiAdvice(null) // Clear previous advice
+    
     try {
-      const adviceRes = await apiClient.getAdvice().catch(err => {
-        console.warn('Failed to load AI advice:', err)
-        return null
-      })
-      console.log('AI Advice response:', adviceRes) // Debug log
-      
-      if (adviceRes) {
-        console.log('Setting AI advice:', adviceRes) // Debug log
-        // Ensure we have the advice object, not wrapped in success/advice
-        const adviceData = (adviceRes as any).advice || adviceRes
-        setAiAdvice(adviceData)
-      } else {
-        setAiAdvice(null)
+      // Try streaming API first
+      try {
+        let accumulatedText = ''
+        await apiClient.getAdviceStream(
+          undefined,
+          // onChunk - accumulate text and parse incrementally
+          (chunk: string) => {
+            accumulatedText += chunk
+            setStreamingText(accumulatedText)
+            // Try to parse partial JSON and update advice in real-time
+            const partialAdvice = parsePartialJSON(accumulatedText)
+            if (partialAdvice.summary || partialAdvice.concerns?.length || partialAdvice.recommendations?.length) {
+              setStreamingAdvice(partialAdvice as Partial<AIAdvice>)
+            }
+          },
+          // onComplete - parse final JSON and display structured advice
+          (adviceData: AIAdvice) => {
+            console.log('AI Advice complete:', adviceData)
+            setAiAdvice(adviceData)
+            setStreamingText('') // Clear streaming text
+            setStreamingAdvice(null)
+            // Save to sessionStorage
+            sessionStorage.setItem('insights_advice', JSON.stringify(adviceData))
+            setAdviceLoading(false)
+          },
+          // onError - fallback to non-streaming
+          async (error: string) => {
+            console.warn('Streaming failed, falling back to regular API:', error)
+            // Fallback to regular API
+            try {
+              const adviceRes = await apiClient.getAdvice().catch(err => {
+                console.warn('Failed to load AI advice:', err)
+                return null
+              })
+              
+              if (adviceRes) {
+                const adviceData = (adviceRes as any).advice || adviceRes
+                setAiAdvice(adviceData)
+                sessionStorage.setItem('insights_advice', JSON.stringify(adviceData))
+              } else {
+                setAiAdvice(null)
+                sessionStorage.removeItem('insights_advice')
+              }
+            } catch (fallbackError) {
+              console.error('Fallback also failed:', fallbackError)
+              setAiAdvice(null)
+              sessionStorage.removeItem('insights_advice')
+            } finally {
+              setStreamingText('')
+              setStreamingAdvice(null)
+              setAdviceLoading(false)
+            }
+          }
+        )
+      } catch (streamError) {
+        // If streaming fails to start, use regular API
+        console.warn('Streaming not available, using regular API:', streamError)
+        const adviceRes = await apiClient.getAdvice().catch(err => {
+          console.warn('Failed to load AI advice:', err)
+          return null
+        })
+        
+        if (adviceRes) {
+          const adviceData = (adviceRes as any).advice || adviceRes
+          setAiAdvice(adviceData)
+          sessionStorage.setItem('insights_advice', JSON.stringify(adviceData))
+        } else {
+          setAiAdvice(null)
+          sessionStorage.removeItem('insights_advice')
+        }
+        setStreamingText('')
+        setStreamingAdvice(null)
+        setAdviceLoading(false)
       }
     } catch (error) {
-      console.error('Error loading AI advice:', error)
+      console.error('Error generating advice:', error)
       setAiAdvice(null)
-    } finally {
+      setStreamingText('')
+      setStreamingAdvice(null)
+      sessionStorage.removeItem('insights_advice')
       setAdviceLoading(false)
     }
   }
@@ -117,18 +289,24 @@ export function Insights() {
         // Check if it's an error response with insufficient_data
         if (predictionsRes.insufficient_data === true || (predictionsRes.predictions && predictionsRes.predictions.length === 0 && predictionsRes.insufficient_data)) {
           setPredictions([])
+          sessionStorage.removeItem('insights_predictions')
         } else if (predictionsRes.predictions && Array.isArray(predictionsRes.predictions)) {
           setPredictions(predictionsRes.predictions)
+          // Save to sessionStorage
+          sessionStorage.setItem('insights_predictions', JSON.stringify(predictionsRes.predictions))
         } else {
           // If response structure is different, try to extract predictions
           setPredictions([])
+          sessionStorage.removeItem('insights_predictions')
         }
       } else {
         setPredictions([])
+        sessionStorage.removeItem('insights_predictions')
       }
     } catch (error) {
       console.error('Error loading predictions:', error)
       setPredictions([])
+      sessionStorage.removeItem('insights_predictions')
     } finally {
       setPredictionsLoading(false)
     }
@@ -149,15 +327,18 @@ export function Insights() {
   }
 
 
-  const safeAdvice = aiAdvice && !aiAdvice.error
+  // Use streaming advice if available, otherwise use final advice
+  const displayAdvice = streamingAdvice || aiAdvice
+  
+  const safeAdvice = displayAdvice && !displayAdvice.error
     ? {
-        ...aiAdvice,
-        summary: aiAdvice.summary || '',
-        concerns: Array.isArray(aiAdvice.concerns) ? aiAdvice.concerns : [],
-        recommendations: Array.isArray(aiAdvice.recommendations) ? aiAdvice.recommendations : [],
-        positive_feedback: Array.isArray(aiAdvice.positive_feedback) ? aiAdvice.positive_feedback : [],
-        next_steps: Array.isArray((aiAdvice as any).next_steps) ? (aiAdvice as any).next_steps : [],
-        confidence_score: aiAdvice.confidence_score || 0,
+        ...displayAdvice,
+        summary: displayAdvice.summary || '',
+        concerns: Array.isArray(displayAdvice.concerns) ? displayAdvice.concerns : [],
+        recommendations: Array.isArray(displayAdvice.recommendations) ? displayAdvice.recommendations : [],
+        positive_feedback: Array.isArray(displayAdvice.positive_feedback) ? displayAdvice.positive_feedback : [],
+        next_steps: Array.isArray((displayAdvice as any).next_steps) ? (displayAdvice as any).next_steps : [],
+        confidence_score: displayAdvice.confidence_score || 0,
       }
     : null
 
@@ -368,13 +549,103 @@ export function Insights() {
           </div>
         </CardHeader>
         <CardContent>
-          {adviceLoading && (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              <span className="ml-3 text-muted-foreground">Generating AI advice...</span>
+          {adviceLoading && streamingAdvice && (
+            <div className="space-y-4">
+              <div className="mb-2 flex items-center">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2"></div>
+                <span className="text-sm text-muted-foreground">Generating advice...</span>
+              </div>
+              
+              {streamingAdvice.summary && (
+                <div className="mb-4">
+                  <p className="text-black dark:text-foreground leading-relaxed">
+                    {streamingAdvice.summary}
+                    <span className="animate-pulse">▋</span>
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-4">
+                {streamingAdvice.concerns && streamingAdvice.concerns.length > 0 && (
+                  <div>
+                    <h4 className="font-medium text-black dark:text-foreground mb-2">Key Concerns</h4>
+                    <div className="space-y-2">
+                      {streamingAdvice.concerns.map((concern, index) => (
+                        <p key={index} className="text-black dark:text-foreground leading-relaxed">
+                          {concern}
+                          {index === streamingAdvice.concerns!.length - 1 && <span className="animate-pulse">▋</span>}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {streamingAdvice.recommendations && streamingAdvice.recommendations.length > 0 && (
+                  <div>
+                    <h4 className="font-medium text-black dark:text-foreground mb-2">Top Recommendations</h4>
+                    <div className="space-y-3">
+                      {streamingAdvice.recommendations.map((rec, index) => (
+                        <p key={index} className="text-black dark:text-foreground leading-relaxed">
+                          <span className="font-medium">{index + 1}. {rec.title}:</span>
+                          {' '}
+                          {rec.description}
+                          {rec.potential_savings && (
+                            <span className="ml-1">
+                              (Potential savings: {rec.potential_savings})
+                            </span>
+                          )}
+                          {index === streamingAdvice.recommendations!.length - 1 && <span className="animate-pulse">▋</span>}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {streamingAdvice.positive_feedback && streamingAdvice.positive_feedback.length > 0 && (
+                  <div>
+                    <h4 className="font-medium text-black dark:text-foreground mb-2">Positive Highlights</h4>
+                    <div className="space-y-2">
+                      {streamingAdvice.positive_feedback.map((feedback, index) => (
+                        <p key={index} className="text-black dark:text-foreground leading-relaxed">
+                          {feedback}
+                          {index === streamingAdvice.positive_feedback!.length - 1 && <span className="animate-pulse">▋</span>}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {streamingAdvice.next_steps && streamingAdvice.next_steps.length > 0 && (
+                  <div>
+                    <h4 className="font-medium text-black dark:text-foreground mb-2">Next Steps</h4>
+                    <div className="space-y-2">
+                      {streamingAdvice.next_steps.map((step, index) => (
+                        <p key={index} className="text-black dark:text-foreground leading-relaxed">
+                          {index + 1}. {step}
+                          {index === streamingAdvice.next_steps!.length - 1 && <span className="animate-pulse">▋</span>}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
-          {!adviceLoading && !safeAdvice && (
+          {adviceLoading && !streamingAdvice && !streamingText && (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <span className="ml-3 text-muted-foreground">Starting AI advice generation...</span>
+            </div>
+          )}
+          {adviceLoading && !streamingAdvice && streamingText && (
+            <div className="py-4">
+              <div className="mb-2 flex items-center">
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary mr-2"></div>
+                <span className="text-sm text-muted-foreground">Processing...</span>
+              </div>
+            </div>
+          )}
+          {!adviceLoading && !safeAdvice && !streamingAdvice && (
             <div className="p-6 bg-muted/50 rounded-lg text-center">
               <p className="text-muted-foreground mb-4">
                 Click "Generate Advice" to get personalized AI-powered financial advice based on your spending patterns.
@@ -412,86 +683,68 @@ export function Insights() {
             <div className="space-y-4">
               {safeAdvice.summary && (
                 <div className="mb-4">
-                  <p className="text-foreground leading-relaxed">{safeAdvice.summary}</p>
+                  <p className="text-black dark:text-foreground leading-relaxed">{safeAdvice.summary}</p>
                 </div>
               )}
 
               {/* Combine all advice into 4-5 key points */}
-              <div className="space-y-3">
+              <div className="space-y-4">
                 {safeAdvice.concerns && safeAdvice.concerns.length > 0 && (
-                  <div className="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border-l-4 border-red-500">
-                    <h4 className="font-medium text-red-900 dark:text-red-100 mb-2 flex items-center">
-                      <AlertCircle className="h-4 w-4 mr-1" />
-                      Key Concerns
-                    </h4>
-                    <ul className="text-red-800 dark:text-red-200 space-y-1 text-sm">
+                  <div>
+                    <h4 className="font-medium text-black dark:text-foreground mb-2">Key Concerns</h4>
+                    <div className="space-y-2">
                       {safeAdvice.concerns.slice(0, 3).map((concern, index) => (
-                        <li key={index} className="flex items-start">
-                          <span className="mr-2">•</span>
-                          <span>{concern}</span>
-                        </li>
+                        <p key={index} className="text-black dark:text-foreground leading-relaxed">
+                          {concern}
+                        </p>
                       ))}
-                    </ul>
+                    </div>
                   </div>
                 )}
 
                 {safeAdvice.recommendations && safeAdvice.recommendations.length > 0 && (
-                  <div className="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border-l-4 border-green-500">
-                    <h4 className="font-medium text-green-900 dark:text-green-100 mb-2 flex items-center">
-                      <CheckCircle className="h-4 w-4 mr-1" />
-                      Top Recommendations
-                    </h4>
-                    <ul className="text-green-800 dark:text-green-200 space-y-2 text-sm">
+                  <div>
+                    <h4 className="font-medium text-black dark:text-foreground mb-2">Top Recommendations</h4>
+                    <div className="space-y-3">
                       {safeAdvice.recommendations.slice(0, 5).map((rec, index) => (
-                        <li key={index} className="flex items-start">
-                          <span className="mr-2 font-bold">{index + 1}.</span>
-                          <div>
-                            <span className="font-medium">{rec.title || `Recommendation ${index + 1}`}:</span>
-                            {' '}
-                            <span>{rec.description}</span>
-                            {rec.potential_savings && (
-                              <span className="text-green-700 dark:text-green-300 ml-1">
-                                (Potential savings: {rec.potential_savings})
-                              </span>
-                            )}
-                          </div>
-                        </li>
+                        <p key={index} className="text-black dark:text-foreground leading-relaxed">
+                          <span className="font-medium">{index + 1}. {rec.title || `Recommendation ${index + 1}`}:</span>
+                          {' '}
+                          {rec.description}
+                          {rec.potential_savings && (
+                            <span className="ml-1">
+                              (Potential savings: {rec.potential_savings})
+                            </span>
+                          )}
+                        </p>
                       ))}
-                    </ul>
+                    </div>
                   </div>
                 )}
 
                 {safeAdvice.positive_feedback && safeAdvice.positive_feedback.length > 0 && (
-                  <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border-l-4 border-blue-500">
-                    <h4 className="font-medium text-blue-900 dark:text-blue-100 mb-2 flex items-center">
-                      <Info className="h-4 w-4 mr-1" />
-                      Positive Highlights
-                    </h4>
-                    <ul className="text-blue-800 dark:text-blue-200 space-y-1 text-sm">
+                  <div>
+                    <h4 className="font-medium text-black dark:text-foreground mb-2">Positive Highlights</h4>
+                    <div className="space-y-2">
                       {safeAdvice.positive_feedback.slice(0, 3).map((feedback, index) => (
-                        <li key={index} className="flex items-start">
-                          <span className="mr-2">✓</span>
-                          <span>{feedback}</span>
-                        </li>
+                        <p key={index} className="text-black dark:text-foreground leading-relaxed">
+                          {feedback}
+                        </p>
                       ))}
-                    </ul>
+                    </div>
                   </div>
                 )}
 
                 {safeAdvice.next_steps && safeAdvice.next_steps.length > 0 && (
-                  <div className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border-l-4 border-purple-500">
-                    <h4 className="font-medium text-purple-900 dark:text-purple-100 mb-2 flex items-center">
-                      <CheckCircle className="h-4 w-4 mr-1" />
-                      Next Steps
-                    </h4>
-                    <ul className="text-purple-800 dark:text-purple-200 space-y-1 text-sm">
+                  <div>
+                    <h4 className="font-medium text-black dark:text-foreground mb-2">Next Steps</h4>
+                    <div className="space-y-2">
                       {safeAdvice.next_steps.slice(0, 5).map((step, index) => (
-                        <li key={index} className="flex items-start">
-                          <span className="mr-2 font-bold">{index + 1}.</span>
-                          <span>{step}</span>
-                        </li>
+                        <p key={index} className="text-black dark:text-foreground leading-relaxed">
+                          {index + 1}. {step}
+                        </p>
                       ))}
-                    </ul>
+                    </div>
                   </div>
                 )}
 
