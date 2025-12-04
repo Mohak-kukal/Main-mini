@@ -110,6 +110,11 @@ class ApiClient {
     return response.data
   }
 
+  async getCategories(): Promise<{ categories: string[] }> {
+    const response = await this.client.get('/transactions/categories')
+    return response.data
+  }
+
   async createTransaction(transaction: {
     account_id: number
     date: string
@@ -131,6 +136,37 @@ class ApiClient {
     await this.client.delete(`/transactions/${id}`)
   }
 
+  async bulkDeleteTransactions(transactionIds: number[]): Promise<{ message: string; deleted_count: number }> {
+    const response = await this.client.post('/transactions/bulk-delete', { transaction_ids: transactionIds })
+    return response.data
+  }
+
+  async exportTransactions(accountId: number, startDate?: string, endDate?: string): Promise<Blob> {
+    try {
+      const response = await this.client.get('/transactions/export', {
+        params: { account_id: accountId, start_date: startDate, end_date: endDate },
+        responseType: 'blob'
+      })
+      
+      // Check if the response is actually an error (JSON error response might be sent as blob)
+      if (response.headers['content-type']?.includes('application/json')) {
+        const text = await (response.data as Blob).text()
+        const errorData = JSON.parse(text)
+        throw new Error(errorData.error || 'Failed to export transactions')
+      }
+      
+      return response.data
+    } catch (error: any) {
+      // If it's an axios error with a blob response, try to parse it as JSON
+      if (error.response?.data instanceof Blob && error.response.headers['content-type']?.includes('application/json')) {
+        const text = await error.response.data.text()
+        const errorData = JSON.parse(text)
+        throw new Error(errorData.error || 'Failed to export transactions')
+      }
+      throw error
+    }
+  }
+
   async uploadReceipt(file: File): Promise<OCRResult> {
     const formData = new FormData()
     formData.append('receipt', file)
@@ -139,6 +175,35 @@ class ApiClient {
       timeout: 60000 // 60 seconds for OCR processing
     })
     return response.data
+  }
+
+  async processRecurringTransactions(): Promise<{ message: string; processed: number }> {
+    const response = await this.client.post('/transactions/process-recurring')
+    return response.data
+  }
+
+  async getRecurringTransactions(accountId?: number): Promise<{ recurring_transactions: any[] }> {
+    const response = await this.client.get('/transactions/recurring', {
+      params: accountId ? { account_id: accountId } : {}
+    })
+    return response.data
+  }
+
+  async updateRecurringTransaction(id: number, updates: {
+    merchant?: string
+    description?: string
+    category?: string
+    amount?: number
+    day_of_month?: number
+    end_date?: string | null
+    is_active?: boolean
+  }): Promise<{ recurring_transaction: any }> {
+    const response = await this.client.put(`/transactions/recurring/${id}`, updates)
+    return response.data
+  }
+
+  async deleteRecurringTransaction(id: number): Promise<void> {
+    await this.client.delete(`/transactions/recurring/${id}`)
   }
 
   // Budget endpoints

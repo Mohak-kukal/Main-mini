@@ -75,8 +75,28 @@ router.post('/train', authenticateToken, async (req, res) => {
 router.get('/predict', authenticateToken, async (req, res) => {
   try {
     const { month, year } = req.query;
-    const targetMonth = month || new Date().getMonth() + 2; // Next month
-    const targetYear = year || new Date().getFullYear();
+    
+    // Calculate target month and year (next month), handling year wrapping
+    let targetMonth = month ? parseInt(month) : null;
+    let targetYear = year ? parseInt(year) : null;
+    
+    if (!targetMonth || !targetYear) {
+      const now = new Date();
+      const currentMonth = now.getMonth(); // 0-11 (0-based)
+      const currentYear = now.getFullYear();
+      const monthsAhead = 1; // Next month
+      
+      // Calculate target month (0-based)
+      const targetMonth0Based = currentMonth + monthsAhead;
+      // Convert to 1-based and handle year wrapping
+      if (targetMonth0Based >= 12) {
+        targetMonth = targetMonth0Based - 12 + 1; // Convert to 1-based, wrapped month
+        targetYear = currentYear + 1; // Next year
+      } else {
+        targetMonth = targetMonth0Based + 1; // Convert to 1-based (1-12)
+        targetYear = currentYear;
+      }
+    }
 
     // Get user's historical spending data
     const spendingData = await db('transactions')
@@ -248,13 +268,8 @@ router.post('/advice/stream', authenticateToken, async (req, res) => {
     const currentMonth = month || new Date().getMonth() + 1;
     const currentYear = year || new Date().getFullYear();
 
-    // Set headers for Server-Sent Events at the very beginning
-    // This ensures headers are set before any response is written
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-
-    // Check total transaction count first
+    // Perform all async database queries first, before setting SSE headers
+    // This allows us to send JSON error responses if queries fail
     const totalTransactions = await db('transactions')
       .where('user_id', req.user.userId)
       .where('amount', '<', 0)
@@ -263,7 +278,8 @@ router.post('/advice/stream', authenticateToken, async (req, res) => {
 
     const MIN_TRANSACTIONS = 10;
     if (parseInt(totalTransactions.count) < MIN_TRANSACTIONS) {
-      const insufficientDataResponse = {
+      // Send JSON response for insufficient data (before SSE headers are set)
+      return res.json({
         summary: `We need at least ${MIN_TRANSACTIONS} transactions to provide personalized financial advice. You currently have ${totalTransactions.count} transaction${totalTransactions.count !== 1 ? 's' : ''}.`,
         concerns: [],
         recommendations: [],
@@ -272,12 +288,7 @@ router.post('/advice/stream', authenticateToken, async (req, res) => {
         insufficient_data: true,
         current_count: parseInt(totalTransactions.count),
         required_count: MIN_TRANSACTIONS
-      };
-      
-      // Send as SSE complete message
-      res.write(`data: ${JSON.stringify({ type: 'complete', advice: insufficientDataResponse })}\n\n`);
-      res.end();
-      return;
+      });
     }
 
     // Get spending data for the last 3 months
@@ -336,6 +347,11 @@ router.post('/advice/stream', authenticateToken, async (req, res) => {
         year: nextYear
       });
 
+    // All async operations completed successfully - now set SSE headers
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
     const adviceData = {
       current_spending: currentSpending,
       monthly_spending: monthlySpending,
@@ -376,7 +392,14 @@ router.post('/advice/stream', authenticateToken, async (req, res) => {
     }
   } catch (error) {
     console.error('Advice streaming error:', error);
-    res.status(500).json({ error: 'Failed to generate financial advice' });
+    // Check if headers have been sent - if not, send JSON error
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Failed to generate financial advice' });
+    } else {
+      // Headers already sent, send SSE-formatted error
+      res.write(`data: ${JSON.stringify({ type: 'error', error: 'Failed to generate financial advice' })}\n\n`);
+      res.end();
+    }
   }
 });
 

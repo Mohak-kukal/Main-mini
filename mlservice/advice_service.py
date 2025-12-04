@@ -18,7 +18,11 @@ class AdviceService:
                 "gemini-1.0-pro",
                 "gemini-pro",
             ]
-        print(f"[Advice] Model candidates: {self.model_names}")
+        # Ensure Gemini Flash is prioritized (fastest model)
+        if "gemini-1.5-flash" in self.model_names:
+            self.model_names.remove("gemini-1.5-flash")
+            self.model_names.insert(0, "gemini-1.5-flash")
+        print(f"[Advice] Model candidates (prioritized): {self.model_names}")
 
     def _detect_text_models(self):
         try:
@@ -215,65 +219,62 @@ class AdviceService:
         }
     
     def _create_advice_prompt(self, analysis_data: Dict[str, Any]) -> str:
-        """Create prompt for Gemini LLM"""
+        """Create optimized prompt for Gemini LLM (reduced size for faster generation)"""
         period_months = analysis_data.get('analysis_period_months', 3)
         
-        prompt = f"""
-        You are a personal finance advisor AI. Analyze the following financial data from the last {period_months} months and provide personalized, actionable advice.
+        # Summarize current spending (top 5 categories only)
+        current_spending = analysis_data.get('current_spending', {})
+        top_spending = sorted(current_spending.items(), key=lambda x: x[1], reverse=True)[:5]
+        current_summary = ", ".join([f"{cat}: ₹{amt:.0f}" for cat, amt in top_spending])
+        
+        # Summarize trends (only significant changes)
+        trends = analysis_data.get('category_trends', {})
+        significant_trends = []
+        for cat, data in trends.items():
+            if isinstance(data, dict) and abs(data.get('change_percentage', 0)) > 10:
+                trend_dir = "↑" if data['change_percentage'] > 0 else "↓"
+                significant_trends.append(f"{cat} {trend_dir}{abs(data['change_percentage']):.0f}%")
+        trends_summary = "; ".join(significant_trends[:5]) if significant_trends else "Stable patterns"
+        
+        # Summarize budget status (only over/at risk)
+        budget_status = analysis_data.get('budget_status', {})
+        budget_issues = []
+        for cat, status in budget_status.items():
+            if isinstance(status, dict):
+                pct = status.get('percentage', 0)
+                if pct > 100:
+                    budget_issues.append(f"{cat}: {pct:.0f}% over budget")
+                elif pct > 80:
+                    budget_issues.append(f"{cat}: {pct:.0f}% (at risk)")
+        budget_summary = "; ".join(budget_issues[:3]) if budget_issues else "All budgets on track"
+        
+        # Summarize predictions (top 3 categories)
+        predictions = analysis_data.get('predictions', {})
+        top_predictions = sorted(predictions.items(), key=lambda x: x[1], reverse=True)[:3]
+        predictions_summary = ", ".join([f"{cat}: ₹{amt:.0f}" for cat, amt in top_predictions])
+        
+        prompt = f"""Analyze financial data and provide advice.
 
-        CURRENT MONTH SPENDING:
-        {json.dumps(analysis_data['current_spending'], indent=2)}
+SPENDING: Current month top categories: {current_summary}. Total: ₹{analysis_data['total_current_spending']:.0f}. Avg monthly: ₹{analysis_data.get('average_monthly_spending', 0):.0f}.
 
-        MONTHLY SPENDING BREAKDOWN (Last {period_months} Months):
-        {json.dumps(analysis_data.get('monthly_spending', {}), indent=2)}
+TRENDS: {trends_summary}
 
-        SPENDING TRENDS BY CATEGORY:
-        {json.dumps(analysis_data.get('category_trends', {}), indent=2)}
+BUDGETS: {budget_summary}
 
-        BUDGET STATUS:
-        {json.dumps(analysis_data['budget_status'], indent=2)}
+PREDICTIONS: Next month top: {predictions_summary}. Total predicted: ₹{analysis_data['total_predicted_spending']:.0f}
 
-        NEXT MONTH PREDICTIONS:
-        {json.dumps(analysis_data['predictions'], indent=2)}
-
-        SPENDING SUMMARY:
-        - Current Month Total: ₹{analysis_data['total_current_spending']:.2f}
-        - {period_months}-Month Total: ₹{analysis_data.get('total_three_month_spending', 0):.2f}
-        - Average Monthly Spending: ₹{analysis_data.get('average_monthly_spending', 0):.2f}
-        - Predicted Next Month: ₹{analysis_data['total_predicted_spending']:.2f}
-
-        Please provide:
-        1. A brief summary of their financial situation over the last {period_months} months, highlighting trends and patterns
-        2. Specific areas of concern (budget overruns, increasing spending trends, high spending categories)
-        3. 3-5 actionable recommendations to improve their finances based on the {period_months}-month analysis
-        4. Positive reinforcement for good financial habits or improvements you notice
-        5. A confidence score (0-100) for your advice based on the data quality
-
-        When analyzing trends:
-        - Identify categories with increasing spending that may need attention
-        - Note categories with decreasing spending as positive changes
-        - Compare current month spending to the {period_months}-month average
-        - Consider seasonal patterns if visible
-
-        Format your response as JSON with the following structure:
+Provide JSON:
         {{
-            "summary": "Brief summary of financial situation over the last {period_months} months, including trends",
-            "concerns": ["List of specific concerns based on trends and current spending"],
+    "summary": "Brief {period_months}-month financial summary with key trends",
+    "concerns": ["Top 2-3 specific concerns"],
             "recommendations": [
-                {{
-                    "title": "Recommendation title",
-                    "description": "Detailed description based on {period_months}-month analysis",
-                    "priority": "high/medium/low",
-                    "potential_savings": "Estimated savings amount"
-                }}
+        {{"title": "Title", "description": "Actionable step", "priority": "high/medium/low", "potential_savings": "Amount"}}
             ],
-            "positive_feedback": ["List of positive observations from the {period_months}-month data"],
-            "confidence_score": 85,
-            "next_steps": ["Immediate action items based on trends"]
+    "positive_feedback": ["1-2 positive observations"],
+    "confidence_score": 85
         }}
 
-        Keep advice practical, encouraging, and specific. Focus on actionable steps based on the {period_months}-month spending patterns rather than generic advice.
-        """
+Keep concise and actionable."""
         
         return prompt
     

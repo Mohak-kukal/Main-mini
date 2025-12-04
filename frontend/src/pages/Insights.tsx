@@ -302,20 +302,20 @@ export function Insights() {
       } catch (streamError) {
         // If streaming fails to start, use regular API
         console.warn('Streaming not available, using regular API:', streamError)
-        const adviceRes = await apiClient.getAdvice().catch(err => {
-          console.warn('Failed to load AI advice:', err)
-          return null
-        })
-        
-        if (adviceRes) {
-          const adviceData = (adviceRes as any).advice || adviceRes
-          setAiAdvice(adviceData)
+      const adviceRes = await apiClient.getAdvice().catch(err => {
+        console.warn('Failed to load AI advice:', err)
+        return null
+      })
+      
+      if (adviceRes) {
+        const adviceData = (adviceRes as any).advice || adviceRes
+        setAiAdvice(adviceData)
           if (user?.id) {
             sessionStorage.setItem('insights_advice', JSON.stringify(adviceData))
             sessionStorage.setItem('insights_user_id', user.id)
           }
-        } else {
-          setAiAdvice(null)
+      } else {
+        setAiAdvice(null)
           sessionStorage.removeItem('insights_advice')
         }
         setStreamingText('')
@@ -352,16 +352,16 @@ export function Insights() {
         } else if (predictionsRes.predictions && Array.isArray(predictionsRes.predictions)) {
           setPredictions(predictionsRes.predictions)
           setPredictionInsufficientData(null) // Clear insufficient data message
-          // Extract month and year from response metadata or calculate 2 months ahead
+          // Extract month and year from response metadata or calculate next month
           let month = (predictionsRes as any).target_month
           let year = (predictionsRes as any).target_year
           
           if (!month || !year) {
-            // Calculate 2 months ahead from current date, handling year wrapping
+            // Calculate next month from current date, handling year wrapping
             const now = new Date()
             const currentMonth = now.getMonth() // 0-11 (0-based)
             const currentYear = now.getFullYear()
-            const monthsAhead = 2
+            const monthsAhead = 1 // Next month
             
             // Calculate target month (0-based)
             const targetMonth0Based = currentMonth + monthsAhead
@@ -607,20 +607,20 @@ export function Insights() {
             }
             
             return (
-              <div className="space-y-3">
-                <p className="text-foreground mb-4">
-                  Based on your spending patterns, here are the predicted expenses for the upcoming month:
-                </p>
-                <ul className="space-y-2 text-foreground">
+            <div className="space-y-3">
+              <p className="text-foreground mb-4">
+                Based on your spending patterns, here are the predicted expenses for the upcoming month:
+              </p>
+              <ul className="space-y-2 text-foreground">
                   {filteredPredictions.map((prediction, index) => (
-                    <li key={index} className="flex items-start">
-                      <span className="mr-2 text-primary font-bold">{index + 1}.</span>
-                      <span>
-                        <span className="font-medium capitalize">{prediction.category}</span>
-                        {' '}spending is predicted to be{' '}
-                        <span className="font-semibold text-primary">
+                  <li key={index} className="flex items-start">
+                    <span className="mr-2 text-primary font-bold">{index + 1}.</span>
+                    <span>
+                      <span className="font-medium capitalize">{prediction.category}</span>
+                      {' '}spending is predicted to be{' '}
+                      <span className="font-semibold text-primary">
                           ₹{Number(prediction.predicted_amount || 0).toFixed(2)}
-                        </span>
+                      </span>
                         {(() => {
                           const month = predictionMonth || prediction.month
                           const year = predictionYear || prediction.year
@@ -629,22 +629,22 @@ export function Insights() {
                             if (!isNaN(date.getTime())) {
                               return (
                                 <>
-                                  {' '}for{' '}
+                      {' '}for{' '}
                                   {date.toLocaleDateString('en-US', { 
-                                    month: 'long', 
-                                    year: 'numeric' 
-                                  })}.
+                        month: 'long', 
+                        year: 'numeric' 
+                      })}.
                                 </>
                               )
                             }
                           }
                           return null
                         })()}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
             )
           })()}
         </CardContent>
@@ -803,10 +803,10 @@ export function Insights() {
             </div>
           )}
           {!adviceLoading && safeAdvice && (safeAdvice as any).insufficient_data && (
-            <div>
+                <div>
               <p className="text-black dark:text-foreground leading-relaxed">
                 {safeAdvice.summary || 'We need at least 10 transactions to generate accurate financial advice. Add more transactions to unlock personalized AI financial advice.'}
-              </p>
+                  </p>
             </div>
           )}
           {!adviceLoading && safeAdvice && !(safeAdvice as any).insufficient_data && (
@@ -825,26 +825,26 @@ export function Insights() {
                 </p>
               )}
 
-              {safeAdvice.concerns && safeAdvice.concerns.length > 0 && (
+                {safeAdvice.concerns && safeAdvice.concerns.length > 0 && (
                 <div>
                   <p className="text-foreground mb-2">Key Concerns:</p>
                   <ul className="space-y-2 text-foreground">
-                    {safeAdvice.concerns.slice(0, 3).map((concern, index) => (
-                      <li key={index} className="flex items-start">
+                      {safeAdvice.concerns.slice(0, 3).map((concern, index) => (
+                        <li key={index} className="flex items-start">
                         <span className="mr-2 text-primary font-bold">{index + 1}.</span>
-                        <span>{concern}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+                          <span>{concern}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
-              {safeAdvice.recommendations && safeAdvice.recommendations.length > 0 && (
+                {safeAdvice.recommendations && safeAdvice.recommendations.length > 0 && (
                 <div>
                   <p className="text-foreground mb-2">Top Recommendations:</p>
                   <ul className="space-y-2 text-foreground">
-                    {safeAdvice.recommendations.slice(0, 5).map((rec, index) => (
-                      <li key={index} className="flex items-start">
+                      {safeAdvice.recommendations.slice(0, 5).map((rec, index) => (
+                        <li key={index} className="flex items-start">
                         <span className="mr-2 text-primary font-bold">{index + 1}.</span>
                         <span>
                           <span className="font-medium">{rec.title || `Recommendation ${index + 1}`}</span>
@@ -854,59 +854,59 @@ export function Insights() {
                               {rec.description}
                             </>
                           )}
-                          {rec.potential_savings && (
+                            {rec.potential_savings && (
                             <span className="ml-1">
-                              (Potential savings: {rec.potential_savings})
-                            </span>
-                          )}
+                                (Potential savings: {rec.potential_savings})
+                              </span>
+                            )}
                         </span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
-              {safeAdvice.positive_feedback && safeAdvice.positive_feedback.length > 0 && (
+                {safeAdvice.positive_feedback && safeAdvice.positive_feedback.length > 0 && (
                 <div>
                   <p className="text-foreground mb-2">Positive Highlights:</p>
                   <ul className="space-y-2 text-foreground">
-                    {safeAdvice.positive_feedback.slice(0, 3).map((feedback, index) => (
-                      <li key={index} className="flex items-start">
+                      {safeAdvice.positive_feedback.slice(0, 3).map((feedback, index) => (
+                        <li key={index} className="flex items-start">
                         <span className="mr-2 text-primary font-bold">{index + 1}.</span>
-                        <span>{feedback}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+                          <span>{feedback}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
-              {safeAdvice.next_steps && safeAdvice.next_steps.length > 0 && (
+                {safeAdvice.next_steps && safeAdvice.next_steps.length > 0 && (
                 <div>
                   <p className="text-foreground mb-2">Next Steps:</p>
                   <ul className="space-y-2 text-foreground">
-                    {safeAdvice.next_steps.slice(0, 5).map((step, index) => (
-                      <li key={index} className="flex items-start">
+                      {safeAdvice.next_steps.slice(0, 5).map((step, index) => (
+                        <li key={index} className="flex items-start">
                         <span className="mr-2 text-primary font-bold">{index + 1}.</span>
-                        <span>{step}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
+                          <span>{step}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
-              {/* Show message if advice exists but no sections have data */}
-              {!safeAdvice.summary && 
-               (!safeAdvice.concerns || safeAdvice.concerns.length === 0) && 
-               (!safeAdvice.recommendations || safeAdvice.recommendations.length === 0) && 
-               (!safeAdvice.positive_feedback || safeAdvice.positive_feedback.length === 0) &&
-               (!safeAdvice.next_steps || safeAdvice.next_steps.length === 0) && (
-                <div className="p-4 bg-muted/50 rounded-lg text-center">
-                  <p className="text-muted-foreground">
-                    AI advice is being generated. Please check back in a moment or refresh the page.
-                  </p>
-                </div>
-              )}
-            </div>
+                {/* Show message if advice exists but no sections have data */}
+                {!safeAdvice.summary && 
+                 (!safeAdvice.concerns || safeAdvice.concerns.length === 0) && 
+                 (!safeAdvice.recommendations || safeAdvice.recommendations.length === 0) && 
+                 (!safeAdvice.positive_feedback || safeAdvice.positive_feedback.length === 0) &&
+                 (!safeAdvice.next_steps || safeAdvice.next_steps.length === 0) && (
+                  <div className="p-4 bg-muted/50 rounded-lg text-center">
+                    <p className="text-muted-foreground">
+                      AI advice is being generated. Please check back in a moment or refresh the page.
+                    </p>
+                  </div>
+                )}
+              </div>
           )}
           </CardContent>
         </Card>

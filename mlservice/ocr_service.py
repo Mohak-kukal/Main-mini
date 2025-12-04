@@ -3,9 +3,10 @@ import os
 import json
 import re
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from pathlib import Path
 import aiofiles
+import aiohttp
 
 class OCRService:
     def __init__(self):
@@ -84,11 +85,12 @@ class OCRService:
             {
                 "merchant": "store/company name",
                 "date": "YYYY-MM-DD",
-                "total_amount": "total amount as number",
+                "total_amount": "total amount as number (without currency symbol)",
+                "currency": "currency code (USD, EUR, GBP, INR, etc.) or symbol ($, €, £, ₹, etc.)",
                 "items": [
                     {
                         "description": "item description",
-                        "amount": "item amount as number"
+                        "amount": "item amount as number (without currency symbol)"
                     }
                 ],
                 "category": "likely expense category (food, transportation, shopping, entertainment, etc.)",
@@ -98,7 +100,8 @@ class OCRService:
             Rules:
             - Extract merchant name from header/top of receipt
             - Extract date in YYYY-MM-DD format (convert if printed as MM/DD/YYYY or DD-MM-YYYY)
-            - Extract total amount (usually at bottom)
+            - Extract total amount as a number (remove currency symbols)
+            - IMPORTANT: Detect and extract the currency code or symbol (USD, EUR, GBP, INR, $, €, £, ₹, etc.)
             - List main items purchased
             - Suggest appropriate category based on merchant and items
             - Return only valid JSON, no additional text
@@ -135,6 +138,19 @@ class OCRService:
                 # Validate and clean the data
                 cleaned_data = self._clean_extracted_data(extracted_data)
                 
+                # Convert currency to INR if needed
+                if "currency" in cleaned_data and "total_amount" in cleaned_data:
+                    currency = cleaned_data.get("currency", "INR")
+                    original_amount = cleaned_data.get("total_amount", 0.0)
+                    
+                    # Convert to INR (async call)
+                    converted_amount = await self._convert_to_inr(original_amount, currency)
+                    
+                    cleaned_data["total_amount"] = round(converted_amount, 2)
+                    cleaned_data["original_amount"] = original_amount
+                    cleaned_data["original_currency"] = currency
+                    cleaned_data["converted_to_inr"] = currency.upper() != "INR"
+                
                 return {
                     "success": True,
                     "data": cleaned_data,
@@ -144,6 +160,17 @@ class OCRService:
             except json.JSONDecodeError as e:
                 # If JSON parsing fails, try to extract data using regex
                 cleaned_data = self._extract_with_regex(response.text)
+                
+                # Try to convert currency if detected
+                if "currency" in cleaned_data and "total_amount" in cleaned_data:
+                    currency = cleaned_data.get("currency", "INR")
+                    original_amount = cleaned_data.get("total_amount", 0.0)
+                    converted_amount = await self._convert_to_inr(original_amount, currency)
+                    cleaned_data["total_amount"] = round(converted_amount, 2)
+                    cleaned_data["original_amount"] = original_amount
+                    cleaned_data["original_currency"] = currency
+                    cleaned_data["converted_to_inr"] = currency.upper() != "INR"
+                
                 return {
                     "success": True,
                     "data": cleaned_data,
@@ -164,6 +191,55 @@ class OCRService:
                     "confidence": 0.0,
                 }
             }
+    
+    async def _convert_to_inr(self, amount: float, currency: str) -> float:
+        """Convert amount from given currency to INR using exchange rates"""
+        if not currency or currency.upper() in ['INR', '₹', 'RS', 'RS.', 'Rs', 'Rs.']:
+            return amount
+        
+        # Normalize currency code
+        currency_map = {
+            '$': 'USD', '€': 'EUR', '£': 'GBP', '¥': 'JPY', '₹': 'INR',
+            'USD': 'USD', 'EUR': 'EUR', 'GBP': 'GBP', 'JPY': 'JPY',
+            'AUD': 'AUD', 'CAD': 'CAD', 'CHF': 'CHF', 'CNY': 'CNY',
+            'SGD': 'SGD', 'AED': 'AED', 'SAR': 'SAR'
+        }
+        
+        currency_code = currency_map.get(currency.upper(), currency.upper())
+        
+        if currency_code == 'INR':
+            return amount
+        
+        try:
+            # Use exchangerate-api.com free tier (no API key needed for base currency USD)
+            # For other base currencies, we'll use a free API
+            async with aiohttp.ClientSession() as session:
+                # Try exchangerate-api.com first (free, no key needed)
+                url = f"https://api.exchangerate-api.com/v4/latest/{currency_code}"
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if 'rates' in data and 'INR' in data['rates']:
+                            rate = data['rates']['INR']
+                            return amount * rate
+                
+                # Fallback: Use fixer.io style API (free alternative)
+                # Using exchangerate.host (free, no API key)
+                url = f"https://api.exchangerate.host/latest?base={currency_code}&symbols=INR"
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if 'rates' in data and 'INR' in data['rates']:
+                            rate = data['rates']['INR']
+                            return amount * rate
+        except Exception as e:
+            print(f"[OCR] Currency conversion error: {e}")
+            # Return original amount if conversion fails
+            return amount
+        
+        # If all APIs fail, return original amount
+        print(f"[OCR] Could not convert {currency_code} to INR, returning original amount")
+        return amount
     
     def _clean_extracted_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Clean and validate extracted data"""
@@ -192,13 +268,23 @@ class OCRService:
                 else:
                     cleaned["date"] = datetime.now().strftime("%Y-%m-%d")
         
+        # Extract currency
+        currency = None
+        if "currency" in data:
+            currency = str(data["currency"]).strip().upper()
+        
         # Clean total amount
         if "total_amount" in data:
             try:
-                amount = float(str(data["total_amount"]).replace("₹", "").replace("$", "").replace(",", "").replace("rs", "").replace("RS", "").replace("Rs", ""))
-                cleaned["total_amount"] = abs(amount)  # Make sure it's positive
+                amount_str = str(data["total_amount"])
+                # Remove common currency symbols and text
+                amount_str = re.sub(r'[₹$€£¥,rsRS]', '', amount_str, flags=re.IGNORECASE)
+                amount = float(amount_str.replace(",", ""))
+                cleaned["total_amount"] = abs(amount)  # Store original amount
+                cleaned["currency"] = currency or "INR"  # Store detected currency
             except ValueError:
                 cleaned["total_amount"] = 0.0
+                cleaned["currency"] = currency or "INR"
         
         # Clean items
         if "items" in data and isinstance(data["items"], list):
@@ -210,7 +296,10 @@ class OCRService:
                         cleaned_item["description"] = str(item["description"]).strip()
                     if "amount" in item:
                         try:
-                            amount = float(str(item["amount"]).replace("₹", "").replace("$", "").replace(",", "").replace("rs", "").replace("RS", "").replace("Rs", ""))
+                            amount_str = str(item["amount"])
+                            # Remove common currency symbols and text
+                            amount_str = re.sub(r'[₹$€£¥,rsRS]', '', amount_str, flags=re.IGNORECASE)
+                            amount = float(amount_str.replace(",", ""))
                             cleaned_item["amount"] = abs(amount)
                         except ValueError:
                             cleaned_item["amount"] = 0.0
@@ -262,23 +351,33 @@ class OCRService:
                 cleaned_data["date"] = match.group(1)
                 break
         
-        # Extract total amount
+        # Extract total amount and currency
         amount_patterns = [
-            r"total[:\s]+(?:rs\.?\s*|₹\s*|\$\s*)?([\d,]+\.?\d*)",
-            r"amount[:\s]+(?:rs\.?\s*|₹\s*|\$\s*)?([\d,]+\.?\d*)",
-            r"[₹$]([\d,]+\.?\d*)",
-            r"rs\.?\s*([\d,]+\.?\d*)"
+            (r"total[:\s]+(?:rs\.?\s*|₹\s*|\$\s*|€\s*|£\s*|USD\s*|EUR\s*|GBP\s*)?([\d,]+\.?\d*)", r"(?:rs\.?\s*|₹|INR)"),
+            (r"amount[:\s]+(?:rs\.?\s*|₹\s*|\$\s*|€\s*|£\s*|USD\s*|EUR\s*|GBP\s*)?([\d,]+\.?\d*)", r"(?:rs\.?\s*|₹|INR)"),
+            (r"₹\s*([\d,]+\.?\d*)", "INR"),
+            (r"\$\s*([\d,]+\.?\d*)", "USD"),
+            (r"€\s*([\d,]+\.?\d*)", "EUR"),
+            (r"£\s*([\d,]+\.?\d*)", "GBP"),
+            (r"rs\.?\s*([\d,]+\.?\d*)", "INR"),
+            (r"USD\s*([\d,]+\.?\d*)", "USD"),
+            (r"EUR\s*([\d,]+\.?\d*)", "EUR"),
+            (r"GBP\s*([\d,]+\.?\d*)", "GBP"),
         ]
         
-        for pattern in amount_patterns:
+        currency_detected = "INR"  # Default
+        for pattern, currency in amount_patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 try:
                     amount = float(match.group(1).replace(",", ""))
                     cleaned_data["total_amount"] = abs(amount)
+                    currency_detected = currency if isinstance(currency, str) else "INR"
                     break
                 except ValueError:
                     continue
+        
+        cleaned_data["currency"] = currency_detected
         
         # Default values
         if "merchant" not in cleaned_data:

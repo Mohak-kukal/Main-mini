@@ -1,4 +1,3 @@
-import React from 'react'
 import { Link } from 'react-router-dom'
 import { TrendingUp, Brain, Receipt, Target, BarChart3, Sparkles } from 'lucide-react'
 import { SignInButton, SignUpButton, useUser } from '@clerk/clerk-react'
@@ -29,11 +28,11 @@ export function Home() {
               </div>
             </div>
             
-            <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6">
-              AI Finance Platform
+            <h1 className="text-5xl md:text-6xl font-bold mb-6 home-title">
+              Finance Platform
             </h1>
             
-            <p className="text-xl md:text-2xl text-gray-700 mb-8 leading-relaxed">
+            <p className="text-xl md:text-2xl mb-8 leading-relaxed home-intro">
               Intelligent personal finance management powered by AI. 
               Track expenses, predict spending, and get personalized financial advice.
             </p>
@@ -65,73 +64,73 @@ export function Home() {
         {/* Features Section */}
         <div className="py-16 px-4">
           <div className="max-w-6xl mx-auto">
-            <h2 className="text-3xl font-bold text-center text-gray-900 mb-12">
+            <h2 className="text-3xl font-bold text-center mb-12 home-features-title">
               Powerful Features
             </h2>
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
               {/* Feature 1 */}
-              <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
-                <div className="h-12 w-12 bg-purple-100 rounded-lg flex items-center justify-center mb-4">
-                  <Brain className="h-6 w-6 text-purple-600" />
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700">
+                <div className="h-12 w-12 bg-purple-100 dark:bg-purple-900 rounded-lg flex items-center justify-center mb-4">
+                  <Brain className="h-6 w-6 text-purple-600 dark:text-purple-400" />
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">AI-Powered OCR</h3>
-                <p className="text-gray-600">
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">AI-Powered OCR</h3>
+                <p className="text-gray-600 dark:text-gray-300">
                   Upload receipt images and let AI extract merchant, date, amount, and category automatically.
                 </p>
               </div>
 
               {/* Feature 2 */}
-              <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
-                <div className="h-12 w-12 bg-green-100 rounded-lg flex items-center justify-center mb-4">
-                  <Receipt className="h-6 w-6 text-green-600" />
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700">
+                <div className="h-12 w-12 bg-green-100 dark:bg-green-900 rounded-lg flex items-center justify-center mb-4">
+                  <Receipt className="h-6 w-6 text-green-600 dark:text-green-400" />
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">Smart Categorization</h3>
-                <p className="text-gray-600">
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Smart Categorization</h3>
+                <p className="text-gray-600 dark:text-gray-300">
                   Machine learning automatically categorizes your expenses using NLP and Random Forest algorithms.
                 </p>
               </div>
 
               {/* Feature 3 */}
-              <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
-                <div className="h-12 w-12 bg-blue-100 rounded-lg flex items-center justify-center mb-4">
-                  <BarChart3 className="h-6 w-6 text-blue-600" />
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700">
+                <div className="h-12 w-12 bg-blue-100 dark:bg-blue-900 rounded-lg flex items-center justify-center mb-4">
+                  <BarChart3 className="h-6 w-6 text-blue-600 dark:text-blue-400" />
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">Spending Predictions</h3>
-                <p className="text-gray-600">
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Spending Predictions</h3>
+                <p className="text-gray-600 dark:text-gray-300">
                   RNN neural networks predict your future spending patterns to help you plan ahead.
                 </p>
               </div>
 
               {/* Feature 4 */}
-              <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
-                <div className="h-12 w-12 bg-yellow-100 rounded-lg flex items-center justify-center mb-4">
-                  <Target className="h-6 w-6 text-yellow-600" />
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700">
+                <div className="h-12 w-12 bg-yellow-100 dark:bg-yellow-900 rounded-lg flex items-center justify-center mb-4">
+                  <Target className="h-6 w-6 text-yellow-600 dark:text-yellow-400" />
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">Budget Tracking</h3>
-                <p className="text-gray-600">
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Budget Tracking</h3>
+                <p className="text-gray-600 dark:text-gray-300">
                   Set budgets by category and get real-time alerts when you're approaching limits.
                 </p>
               </div>
 
               {/* Feature 5 */}
-              <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
-                <div className="h-12 w-12 bg-red-100 rounded-lg flex items-center justify-center mb-4">
-                  <Sparkles className="h-6 w-6 text-red-600" />
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700">
+                <div className="h-12 w-12 bg-red-100 dark:bg-red-900 rounded-lg flex items-center justify-center mb-4">
+                  <Sparkles className="h-6 w-6 text-red-600 dark:text-red-400" />
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">AI Financial Advice</h3>
-                <p className="text-gray-600">
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">AI Financial Advice</h3>
+                <p className="text-gray-600 dark:text-gray-300">
                   Get personalized financial recommendations powered by Gemini LLM based on your spending patterns.
                 </p>
               </div>
 
               {/* Feature 6 */}
-              <div className="bg-white p-6 rounded-xl shadow-lg border border-gray-100">
-                <div className="h-12 w-12 bg-indigo-100 rounded-lg flex items-center justify-center mb-4">
-                  <TrendingUp className="h-6 w-6 text-indigo-600" />
+              <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-lg border border-gray-100 dark:border-gray-700">
+                <div className="h-12 w-12 bg-indigo-100 dark:bg-indigo-900 rounded-lg flex items-center justify-center mb-4">
+                  <TrendingUp className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
                 </div>
-                <h3 className="text-xl font-semibold text-gray-900 mb-2">Interactive Dashboard</h3>
-                <p className="text-gray-600">
+                <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Interactive Dashboard</h3>
+                <p className="text-gray-600 dark:text-gray-300">
                   Beautiful charts and visualizations to understand your financial health at a glance.
                 </p>
               </div>

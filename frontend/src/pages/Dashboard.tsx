@@ -18,7 +18,8 @@ import {
   Tooltip, 
   ResponsiveContainer,
   LineChart,
-  Line
+  Line,
+  Legend
 } from 'recharts'
 import { apiClient } from '../lib/api'
 import { Account, Transaction, BudgetAnalysis, InsightsData } from '../types'
@@ -33,7 +34,9 @@ export function Dashboard() {
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([])
   const [budgetAnalysis, setBudgetAnalysis] = useState<BudgetAnalysis[]>([])
   const [insights, setInsights] = useState<InsightsData | null>(null)
+  const [currentMonthSpending, setCurrentMonthSpending] = useState<number>(0)
   const [loading, setLoading] = useState(true)
+  const [selectedPeriod, setSelectedPeriod] = useState(6)
   const location = useLocation()
   const { theme } = useTheme()
   const [mounted, setMounted] = useState(false)
@@ -45,11 +48,11 @@ export function Dashboard() {
   const isDark = mounted && (theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches))
   const chartColors = getChartColors(isDark)
 
-  // Reload when navigating to dashboard
+  // Reload when navigating to dashboard or period changes
   useEffect(() => {
     loadDashboardData()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname])
+  }, [location.pathname, selectedPeriod])
 
   // Also reload when window regains focus (user might have added transactions in another tab)
   useEffect(() => {
@@ -66,25 +69,44 @@ export function Dashboard() {
   const loadDashboardData = async () => {
     setLoading(true)
     try {
+      // Calculate current month date range
+      const now = new Date()
+      const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+      const currentMonthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0)
+      const currentMonthStartStr = currentMonthStart.toISOString().split('T')[0]
+      const currentMonthEndStr = currentMonthEnd.toISOString().split('T')[0]
+
       // Load essential data first (fast)
       const [
         accountsRes,
         transactionsRes,
-        budgetRes
+        budgetRes,
+        currentMonthTransactionsRes
       ] = await Promise.all([
         apiClient.getAccounts(),
         apiClient.getTransactions({ limit: 10 }),
-        apiClient.getBudgetAnalysis()
+        apiClient.getBudgetAnalysis(),
+        apiClient.getTransactions({ 
+          start_date: currentMonthStartStr,
+          end_date: currentMonthEndStr
+        })
       ])
 
       setAccounts(accountsRes.accounts)
       setRecentTransactions(transactionsRes.transactions)
       setBudgetAnalysis(budgetRes.analysis)
+      
+      // Calculate actual current month spending
+      const currentMonthTotal = currentMonthTransactionsRes.transactions
+        .filter(t => t.amount < 0)
+        .reduce((sum, t) => sum + Math.abs(t.amount), 0)
+      setCurrentMonthSpending(currentMonthTotal)
+      
       setLoading(false)
 
-      // Load insights in background (slow, but don't block UI)
+      // Load insights in background (slow, but don't block UI) - use selected period
       try {
-        const insightsRes = await apiClient.getInsights({ months: 6 }).catch(err => {
+        const insightsRes = await apiClient.getInsights({ months: selectedPeriod }).catch(err => {
           console.warn('Failed to load insights:', err)
           return null
         })
@@ -100,9 +122,6 @@ export function Dashboard() {
   }
 
   const totalBalance = accounts.reduce((sum, account) => sum + (typeof account.balance === 'number' ? account.balance : parseFloat(String(account.balance)) || 0), 0)
-  const monthlySpending = recentTransactions
-    .filter(t => t.amount < 0)
-    .reduce((sum, t) => sum + Math.abs(t.amount), 0)
 
   const spendingByCategory = (insights?.top_categories || [])
     .filter(cat => cat.category && cat.total < 0) // Only include valid categories with expenses
@@ -146,6 +165,19 @@ export function Dashboard() {
           <h1 className="text-3xl font-bold text-foreground">Dashboard</h1>
           <p className="text-muted-foreground">Welcome back! Here's your financial overview.</p>
         </div>
+        <div className="flex items-center gap-3">
+          <label className="text-sm font-medium text-foreground">Period:</label>
+          <select
+            value={selectedPeriod}
+            onChange={(e) => {
+              setSelectedPeriod(parseInt(e.target.value))
+            }}
+            className="px-3 py-2 border border-input bg-background rounded-md focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            <option value={3}>Last 3 months</option>
+            <option value={6}>Last 6 months</option>
+            <option value={12}>Last 12 months</option>
+          </select>
         <Button
           onClick={() => loadDashboardData()}
           variant="outline"
@@ -154,6 +186,7 @@ export function Dashboard() {
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </Button>
+        </div>
       </div>
 
       {/* Key Metrics */}
@@ -180,7 +213,7 @@ export function Dashboard() {
               </div>
               <div className="ml-4">
                 <p className="text-sm font-medium text-muted-foreground">Monthly Spending</p>
-                <p className="text-2xl font-bold text-foreground">₹{monthlySpending.toFixed(2)}</p>
+                <p className="text-2xl font-bold text-foreground">₹{currentMonthSpending.toFixed(2)}</p>
               </div>
             </div>
           </CardContent>
@@ -236,10 +269,10 @@ export function Dashboard() {
                   <Pie
                     data={spendingByCategory}
                     cx="50%"
-                    cy="50%"
+                    cy="45%"
                     labelLine={false}
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                    outerRadius={80}
+                    label={({ percent }) => percent > 0.05 ? `${(percent * 100).toFixed(0)}%` : ''}
+                    outerRadius={70}
                     fill={chartColors[0]}
                     dataKey="value"
                   >
@@ -248,7 +281,7 @@ export function Dashboard() {
                     ))}
                   </Pie>
                   <Tooltip 
-                    formatter={(value) => [`₹${Number(value).toFixed(2)}`, 'Amount']}
+                    formatter={(value, name) => [`₹${Number(value).toFixed(2)}`, name]}
                     contentStyle={{
                       backgroundColor: 'hsl(var(--popover))',
                       border: '1px solid hsl(var(--border))',
@@ -260,6 +293,19 @@ export function Dashboard() {
                     }}
                     labelStyle={{
                       color: 'hsl(var(--popover-foreground))',
+                    }}
+                  />
+                  <Legend 
+                    verticalAlign="bottom" 
+                    height={36}
+                    formatter={(value, entry: any) => (
+                      <span style={{ color: entry.color }}>
+                        {value}
+                      </span>
+                    )}
+                    wrapperStyle={{
+                      paddingTop: '10px',
+                      fontSize: '12px'
                     }}
                   />
                 </PieChart>
@@ -353,7 +399,15 @@ export function Dashboard() {
                   <div className="flex items-center space-x-4 text-sm text-muted-foreground">
                     <span>Spent: ₹{Number(budget.spent || 0).toFixed(2)}</span>
                     <span>Budget: ₹{Number(budget.limit_amount || 0).toFixed(2)}</span>
-                    <span>Remaining: ₹{Number(budget.remaining || 0).toFixed(2)}</span>
+                    <span>
+                      {Number(budget.remaining || 0) < 0 ? 'Exceeded by' : 'Remaining'}:{' '}
+                      <span className={Number(budget.remaining || 0) < 0 ? 'text-destructive' : ''}>
+                        ₹{Number(budget.remaining || 0) < 0 
+                          ? Math.abs(Number(budget.remaining || 0)).toFixed(2)
+                          : Number(budget.remaining || 0).toFixed(2)
+                        }
+                      </span>
+                    </span>
                   </div>
                   <div className="mt-2 bg-secondary rounded-full h-2">
                     <div

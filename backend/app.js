@@ -9,6 +9,7 @@ const accountRoutes = require('./routes/accounts');
 const transactionRoutes = require('./routes/transactions');
 const budgetRoutes = require('./routes/budgets');
 const aiRoutes = require('./routes/ai');
+const { processRecurringTransactions } = require('./jobs/processRecurringTransactions');
 
 const app = express();
 
@@ -87,10 +88,63 @@ app.use('*', (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
+// Process recurring transactions on startup and then daily
+async function startRecurringTransactionProcessor() {
+  try {
+    console.log('🔄 Processing recurring transactions on startup...');
+    await processRecurringTransactions();
+    console.log('✅ Initial recurring transaction processing complete');
+  } catch (error) {
+    console.error('❌ Error processing recurring transactions on startup:', error);
+  }
+
+  // Process recurring transactions daily at 2 AM
+  const processDaily = async () => {
+    try {
+      const now = new Date();
+      console.log(`🔄 Processing recurring transactions at ${now.toISOString()}...`);
+      await processRecurringTransactions();
+      console.log('✅ Daily recurring transaction processing complete');
+    } catch (error) {
+      console.error('❌ Error processing recurring transactions:', error);
+    }
+  };
+
+  // Calculate milliseconds until next 2 AM
+  const getMsUntil2AM = () => {
+    const now = new Date();
+    const next2AM = new Date();
+    next2AM.setHours(2, 0, 0, 0);
+    if (next2AM <= now) {
+      next2AM.setDate(next2AM.getDate() + 1);
+    }
+    return next2AM.getTime() - now.getTime();
+  };
+
+  // Schedule first run at next 2 AM
+  setTimeout(() => {
+    processDaily();
+    // Then run every 24 hours
+    setInterval(processDaily, 24 * 60 * 60 * 1000);
+  }, getMsUntil2AM());
+
+  // Also process every hour to catch any missed transactions
+  setInterval(async () => {
+    try {
+      await processRecurringTransactions();
+    } catch (error) {
+      console.error('❌ Error in hourly recurring transaction check:', error);
+    }
+  }, 60 * 60 * 1000); // Every hour
+}
+
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📊 AI Finance Platform Backend API`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  
+  // Start recurring transaction processor
+  startRecurringTransactionProcessor();
 });
 
 module.exports = app;

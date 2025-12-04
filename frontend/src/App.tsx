@@ -71,12 +71,7 @@ const router = createBrowserRouter([
       },
     ],
   },
-], {
-  future: {
-    v7_startTransition: true,
-    v7_relativeSplatPath: true,
-  },
-})
+])
 
 function App() {
   // Preserve scroll position when switching browser tabs (not when navigating between pages)

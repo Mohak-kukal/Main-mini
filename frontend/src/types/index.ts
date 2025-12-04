@@ -26,6 +26,8 @@ export interface Transaction {
   created_at: string
   account_name?: string
   account_type?: string
+  is_recurring?: boolean
+  recurring_transaction_id?: number
 }
 
 export interface Budget {
@@ -147,6 +149,9 @@ export interface OCRResult {
     merchant: string
     date: string
     total_amount: number
+    original_amount?: number
+    original_currency?: string
+    converted_to_inr?: boolean
     items: Array<{
       description: string
       amount: number
@@ -162,4 +167,24 @@ export interface CategorizationResult {
   category: string
   confidence: number
   method: string
+}
+
+export interface RecurringTransaction {
+  id: number
+  user_id: number
+  account_id: number
+  day_of_month: number
+  merchant?: string
+  description?: string
+  category?: string
+  amount: number
+  is_expense: boolean
+  start_date: string
+  end_date?: string | null
+  last_processed?: string | null
+  is_active: boolean
+  created_at: string
+  updated_at: string
+  account_name?: string
+  account_type?: string
 }

@@ -24,10 +24,23 @@ export function Budgets() {
     year: new Date().getFullYear()
   })
   const [budgetType, setBudgetType] = useState<'category' | 'monthly'>('category')
+  const [availableCategories, setAvailableCategories] = useState<string[]>([])
 
   useEffect(() => {
     loadBudgets()
+    loadCategories()
   }, [])
+
+  const loadCategories = async () => {
+    try {
+      const response = await apiClient.getCategories()
+      setAvailableCategories(response.categories)
+    } catch (error) {
+      console.error('Error loading categories:', error)
+      // Fallback to base categories
+      setAvailableCategories(['food', 'transportation', 'shopping', 'entertainment', 'utilities', 'healthcare', 'education', 'travel', 'insurance', 'other'])
+    }
+  }
 
   const loadBudgets = async () => {
     try {
@@ -328,28 +341,23 @@ export function Budgets() {
               </div>
             </div>
             {budgetType === 'category' && (
-              <div className="space-y-2">
-                <Label htmlFor="category">Category</Label>
-                <Select
-                  value={formData.category || undefined}
+            <div className="space-y-2">
+              <Label htmlFor="category">Category</Label>
+              <Select
+                value={formData.category || undefined}
                   onValueChange={(value) => {
                     setFormData({ ...formData, category: value })
                   }}
-                >
+              >
                 <SelectTrigger id="category">
                   <SelectValue placeholder="Select Category" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="food">Food</SelectItem>
-                  <SelectItem value="transportation">Transportation</SelectItem>
-                  <SelectItem value="shopping">Shopping</SelectItem>
-                  <SelectItem value="entertainment">Entertainment</SelectItem>
-                  <SelectItem value="utilities">Utilities</SelectItem>
-                  <SelectItem value="healthcare">Healthcare</SelectItem>
-                  <SelectItem value="education">Education</SelectItem>
-                  <SelectItem value="travel">Travel</SelectItem>
-                  <SelectItem value="insurance">Insurance</SelectItem>
-                  <SelectItem value="other">Other</SelectItem>
+                  {availableCategories.map(cat => (
+                    <SelectItem key={cat} value={cat}>
+                      {cat.charAt(0).toUpperCase() + cat.slice(1)}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

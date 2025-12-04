@@ -57,3 +57,55 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer utilities {
+  .home-title {
+    color: black !important;
+  }
+  
+  .dark .home-title {
+    color: white !important;
+  }
+  
+  .home-intro {
+    color: black !important;
+  }
+  
+  .dark .home-intro {
+    color: rgb(209 213 219) !important; /* gray-300 */
+  }
+  
+  .home-features-title {
+    color: black !important;
+  }
+  
+  .dark .home-features-title {
+    color: white !important;
+  }
+}
+
+/* Calendar icon styling for date inputs - using blue color that works in both modes */
+/* Chrome, Edge, Safari - Calendar icon */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 1;
+  filter: invert(27%) sepia(95%) saturate(2598%) hue-rotate(212deg) brightness(97%) contrast(96%);
+}
+
+/* Dark mode - lighter blue for better visibility */
+.dark input[type="date"]::-webkit-calendar-picker-indicator,
+html.dark input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(48%) sepia(95%) saturate(2598%) hue-rotate(212deg) brightness(120%) contrast(96%) !important;
+  opacity: 1 !important;
+  cursor: pointer !important;
+}
+
+/* Firefox - Calendar icon */
+input[type="date"] {
+  color-scheme: light;
+}
+
+.dark input[type="date"],
+html.dark input[type="date"] {
+  color-scheme: dark;
+}
